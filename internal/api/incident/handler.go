@@ -65,15 +65,20 @@ func commandRouting(slackApi *slack.Client, req PostHandlerRequest) error {
 	switch {
 	case text == "create":
 		return createIncident(slackApi, req)
-	case strings.HasPrefix(text, "timeline"):
+	case strings.HasPrefix(text, "timeline "):
 		timelineText := strings.TrimPrefix(text, "timeline ")
 		return AddTimelineItem(slackApi, req.Body.ChannelId, req.Body.UserId, timelineText)
 	case text == "update":
 		return updateIncident(slackApi, req)
+	case strings.HasPrefix(text, "action-item "):
+		actionItemText := strings.TrimPrefix(text, "action-item ")
+		return AddActionItem(slackApi, req.Body.ChannelId, req.Body.UserId, actionItemText)
+	case text == "help":
+		slackApi.PostEphemeral(req.Body.ChannelId, req.Body.UserId, slack.MsgOptionBlocks(HelpMessage().BlockSet...))
 	case text == "":
-		slackApi.PostEphemeral(req.Body.ChannelId, req.Body.UserId, slack.MsgOptionText("Please provide a command", false))
+		slackApi.PostEphemeral(req.Body.ChannelId, req.Body.UserId, slack.MsgOptionText("Please provide a command. Use `/incident help` for details on available commands.", false))
 	default:
-		slackApi.PostEphemeral(req.Body.ChannelId, req.Body.UserId, slack.MsgOptionText(fmt.Sprintf("Command `%s` not found", req.Body.Text), false))
+		slackApi.PostEphemeral(req.Body.ChannelId, req.Body.UserId, slack.MsgOptionText(fmt.Sprintf("Command `%s` not found. Use `/incident help` for details on available commands.", req.Body.Text), false))
 	}
 
 	return nil

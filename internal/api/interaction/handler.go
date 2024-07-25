@@ -78,12 +78,44 @@ func Interaction(slackApi *slack.Client, req *PostHandlerRequest) (*PostHandlerR
 			if err != nil {
 				return nil, err
 			}
+
+			err = incident.CreateActionItems(
+				slackApi,
+				channel.ID,
+				req.Body.Payload.User.Name,
+			)
+
+			if severity == "SEV-1" || severity == "SEV-2" {
+				err = incident.AddActionItem(
+					slackApi,
+					channel.ID,
+					req.Body.Payload.User.Name,
+					"Create incident postmortem",
+				)
+				if err != nil {
+					log.Printf("Error adding action item: %s", err)
+					return nil, err
+				}
+			}
+			slackApi.PostEphemeral(channel.ID, req.Body.Payload.User.ID, slack.MsgOptionBlocks(incident.HelpMessage().BlockSet...))
+
 		case "update_incident_modal":
 			status := req.Body.Payload.View.State.Values["status"]["status"].SelectedOption.Text.Text
 			severity := req.Body.Payload.View.State.Values["incident_severity"]["incident_severity"].SelectedOption.Text.Text
 			channelID := req.Body.Payload.View.PrivateMetadata
 
-			fmt.Println(channelID)
+			if severity == "SEV-1" || severity == "SEV-2" {
+				err := incident.AddActionItem(
+					slackApi,
+					channelID,
+					req.Body.Payload.User.Name,
+					"Create incident postmortem",
+				)
+				if err != nil {
+					log.Printf("Error adding action item: %s", err)
+					return nil, err
+				}
+			}
 
 			err := incident.AddTimelineItem(
 				slackApi,
