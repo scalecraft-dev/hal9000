@@ -1,0 +1,12 @@
+services:
+  hal:
+    image: hal:latest
+    build:
+      context: ..
+      dockerfile: .docker/hal.Dockerfile
+    ports:
+      - "5000:5000"
+    working_dir: /hal
+    command: go run "-mod=mod" .
+    volumes:
+      - ..:/hal
