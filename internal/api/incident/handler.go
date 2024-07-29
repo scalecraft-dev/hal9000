@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gin-gonic/gin/binding"
 	"github.com/slack-go/slack"
 )
 
@@ -19,9 +18,15 @@ type PostHandlerResponse struct {
 
 func PostHandler(slackApi *slack.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !c.GetBool("x-valid-slack-request") {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"Error": "Invalid request",
+			})
+			return
+		}
 		ir := CreateIncidentRequest{}
 
-		err := c.MustBindWith(&ir, binding.Form)
+		err := c.ShouldBind(&ir)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"Request body invalid. Error:": err.Error(),
@@ -41,22 +46,6 @@ func PostHandler(slackApi *slack.Client) gin.HandlerFunc {
 			})
 			return
 		}
-
-		// channel, err := createChannel(slackApi)
-		// if err != nil {
-		// 	c.JSON(http.StatusInternalServerError, gin.H{
-		// 		"Error": "Could not create channel", "Details": err,
-		// 	})
-		// 	return
-		// }
-
-		// err = addChannelParticipants(sr, slackApi, channel.ID)
-		// if err != nil {
-		// 	c.JSON(http.StatusInternalServerError, gin.H{
-		// 		"Error": "Could not add participants to channel", "Details": err,
-		// 	})
-		// 	return
-		// }
 	}
 }
 

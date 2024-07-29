@@ -8,7 +8,6 @@ import (
 
 	"github.com/Imagine-Pediatrics/hal/internal/api/incident"
 	"github.com/gin-gonic/gin"
-	"github.com/gin-gonic/gin/binding"
 	"github.com/slack-go/slack"
 )
 
@@ -21,9 +20,15 @@ type PostHandlerResponse struct {
 
 func PostHandler(slackApi *slack.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !c.GetBool("x-valid-slack-request") {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"Error": "Invalid request",
+			})
+			return
+		}
 		interaction := InteractionModal{}
 
-		err := c.MustBindWith(&interaction, binding.Form)
+		err := c.ShouldBind(&interaction)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"Request body invalid. Error:": err.Error(),
@@ -38,6 +43,7 @@ func PostHandler(slackApi *slack.Client) gin.HandlerFunc {
 		response, err := Interaction(slackApi, req)
 
 		if err != nil {
+			fmt.Println(err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"internal service error loading data.": err.Error(),
 			})
