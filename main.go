@@ -1,84 +1,69 @@
 package main
 
 import (
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"flag"
-	"fmt"
-	"io/ioutil"
 	"log"
 	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/Imagine-Pediatrics/hal/internal/api/config"
-	"github.com/Imagine-Pediatrics/hal/internal/api/health"
-	"github.com/Imagine-Pediatrics/hal/internal/api/incident"
-	"github.com/Imagine-Pediatrics/hal/internal/api/interaction"
-	"github.com/joho/godotenv"
-
+	"github.com/Imagine-Pediatrics/hal/internal"
 	"github.com/gin-gonic/gin"
 	"github.com/slack-go/slack"
 )
 
-func middleware(slackApi *slack.Client, cfg config.Config) gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		ctx.Set("slackApi", slackApi)
-
-		byteBody, err := ioutil.ReadAll(ctx.Request.Body)
-		ctx.Request.Body = ioutil.NopCloser(bytes.NewBuffer(byteBody))
-		if err != nil {
-			ctx.JSON(500, gin.H{"error": "Error reading request body"})
-		}
-
-		slackTimestamp := ctx.GetHeader("x-slack-request-timestamp")
-
-		hash := hmac.New(sha256.New, []byte(cfg.SlackSigningSecret))
-		hash.Write([]byte(fmt.Sprintf("v0:%s:%s", slackTimestamp, string(byteBody))))
-
-		computed := fmt.Sprintf("v0=%s", hex.EncodeToString(hash.Sum(nil)))
-
-		slackSignature := ctx.GetHeader("x-slack-signature")
-
-		if slackSignature == computed {
-			ctx.Set("x-valid-slack-request", true)
-		} else {
-			ctx.Set("x-valid-slack-request", false)
-		}
-		ctx.Next()
-	}
-}
-
-func init() {
-	err := godotenv.Load()
-
-	if err != nil {
-		slog.Warn("Error loading .env file")
-	}
-}
-
 func main() {
 	flag.Parse()
 
-	config := config.GetConfig()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
 
-	r := gin.Default()
-	slackApi := slack.New(config.SlackToken)
-	r.Use(middleware(slackApi, *config))
-
-	err := r.SetTrustedProxies(nil)
-
+	cfg, err := internal.LoadConfig()
 	if err != nil {
-		log.Fatalf("error setting trusted proxies: %v", err)
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
-	r.GET("/health", health.GetHandler)
-	r.POST("/incident", incident.PostHandler(slackApi))
-	r.POST("/interaction", interaction.PostHandler(slackApi))
+	slackClient := slack.New(cfg.SlackToken)
+	slackService := internal.NewSlackService(slackClient, cfg)
+	incidentService := internal.NewIncidentService(slackService, cfg)
 
-	err = r.Run(":50051")
+	router := gin.Default()
+	router.Use(internal.SlackAuthMiddleware(cfg.SlackSigningSecret))
+	internal.RegisterRoutes(router, incidentService, slackService)
 
-	if err != nil {
-		log.Fatalf("could not start server %v", err)
+	srv := &http.Server{
+		Addr:    ":" + os.Getenv("PORT"),
+		Handler: router,
 	}
+
+	if srv.Addr == ":" {
+		srv.Addr = ":50051"
+	}
+
+	go func() {
+		slog.Info("Starting server", "address", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("Failed to start server", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("Shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("Server forced to shutdown", "error", err)
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	slog.Info("Server exited")
 }
